@@ -7,3 +7,5 @@ langchain-community
 beautifulsoup4
 requests
 pydantic
+ddgs
+duckduckgo-search
