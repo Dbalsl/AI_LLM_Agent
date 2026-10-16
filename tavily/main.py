@@ -36,7 +36,7 @@ def generate_report(req: ChatRequest):
         
         # 2. 제미나이 LLM 초기화 (쉼표 누락 및 모델명 오타 수정)
         llm = ChatGoogleGenerativeAI(
-            model="gemini-3.1-flash", 
+            model="gemini-3.5-flash-lite", 
             temperature=0.2,
             max_retries=3  # 429 에러 시 최대 3회 자동 재시도
         )
