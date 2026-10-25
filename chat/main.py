@@ -24,6 +24,8 @@ SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 
 if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise ValueError("Supabase 관련 환경 변수가 설정되지 않았습니다.")
 
