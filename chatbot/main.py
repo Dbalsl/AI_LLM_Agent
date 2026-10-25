@@ -11,7 +11,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.retrievers import MultiQueryRetriever
-from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain.callbacks.base import BaseCallbackHandler
@@ -26,9 +26,10 @@ GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GOOGLE_API_KEY:
     raise ValueError("GEMINI_API_KEY 환경 변수가 설정되어 있지 않습니다.")
 
-# 전역 벡터스토어 및 검색기 관리 객체 (간이 세션 저장소)
+# 전역 벡터스토어, 검색기 및 백그라운드 작업 상태 관리 객체
 vector_store = None
 retriever = None
+db_status = {"status": "idle", "message": "대기 중"}
 
 # ---------------------------------------------------------
 # 1. 실시간 스트리밍 핸들러 (StreamHandler) 정의
@@ -40,7 +41,6 @@ class StreamHandler(BaseCallbackHandler):
 
     async def on_llm_new_token(self, token: str, **kwargs) -> None:
         """새로운 토큰이 생성될 때마다 호출됨"""
-        # 실제 프로덕션 환경에서는 asyncio.Queue 등을 활용하여 토큰을 비동기 전달
         pass
 
 
@@ -52,24 +52,19 @@ class QueryRequest(BaseModel):
 
 
 # ---------------------------------------------------------
-# 2. PDF 처리 및 Vector DB 생성 엔드포인트
+# 2. 백그라운드 벡터 DB 생성 함수 (타임아웃 방지)
 # ---------------------------------------------------------
-@app.post("/api/vectorstore/create")
-async def create_vector_store(file: UploadFile = File(...)):
-    """업로드된 PDF 파일을 읽어 텍스트를 추출하고, 청크로 분할한 뒤 Chroma DB에 배치 단위로 적재합니다."""
-    global vector_store, retriever
-    
-    temp_file_path = f"temp_{file.filename}"
+def process_vector_store_background(file_path: str):
+    """서버 타임아웃을 방지하기 위해 백그라운드에서 실행되는 PDF 파싱 및 임베딩 적재 로직"""
+    global vector_store, retriever, db_status
     try:
-        # 업로드된 PDF 파일을 서버 임시 디렉토리에 저장
-        with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
+        db_status = {"status": "processing", "message": "PDF 텍스트 추출 및 임베딩 생성 중..."}
+        
         # PyPDFLoader를 사용하여 PDF 텍스트 추출
-        loader = PyPDFLoader(temp_file_path)
+        loader = PyPDFLoader(file_path)
         docs = loader.load()
 
-        # 텍스트 청크 분할 (크기 1000, 오버랩 100으로 설정하여 전체 청크 수 최적화)
+        # RecursiveCharacterTextSplitter를 활용하여 청크 단위로 분할 (크기 1000, 오버랩 100)
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         chunks = text_splitter.split_documents(docs)
 
@@ -79,16 +74,18 @@ async def create_vector_store(file: UploadFile = File(...)):
             google_api_key=GOOGLE_API_KEY
         )
 
-        # [핵심 수정] 504 타임아웃 방지를 위해 청크를 20개씩 나누어 순차적으로 벡터 DB에 적재
-        batch_size = 20
-        vector_store = None
+        # 타임아웃 방지를 위해 10개씩 배치 단위로 Chroma DB에 적재
+        batch_size = 10
+        temp_vector_store = None
 
         for i in range(0, len(chunks), batch_size):
             batch_chunks = chunks[i:i + batch_size]
-            if vector_store is None:
-                vector_store = Chroma.from_documents(batch_chunks, embeddings)
+            if temp_vector_store is None:
+                temp_vector_store = Chroma.from_documents(batch_chunks, embeddings)
             else:
-                vector_store.add_documents(batch_chunks)
+                temp_vector_store.add_documents(batch_chunks)
+
+        vector_store = temp_vector_store
 
         # 랭체인 다중 질문 검색기(MultiQueryRetriever) 구성
         base_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
@@ -103,29 +100,57 @@ async def create_vector_store(file: UploadFile = File(...)):
             llm=llm_for_query
         )
 
-        return {
-            "status": "success",
-            "message": f"벡터 DB가 성공적으로 생성되었습니다. (총 청크 수: {len(chunks)}개)"
-        }
+        db_status = {"status": "completed", "message": f"벡터 DB 생성 완료! (총 청크 수: {len(chunks)}개)"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        db_status = {"status": "error", "message": f"오류 발생: {str(e)}"}
     finally:
         # 임시 파일 삭제 정리
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
 
 # ---------------------------------------------------------
-# 3. 질의응답 및 스트리밍 답변 생성 엔드포인트
+# 3. PDF 업로드 및 백그라운드 작업 등록 엔드포인트
+# ---------------------------------------------------------
+@app.post("/api/vectorstore/create")
+async def create_vector_store(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+    """업로드된 PDF 파일을 받아 즉시 응답을 반환하고, 백그라운드에서 벡터 DB 생성을 수행합니다."""
+    temp_file_path = f"temp_{file.filename}"
+    
+    # 업로드된 파일을 임시 저장
+    with open(temp_file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # 백그라운드 태스크 등록 (클라이언트 타임아웃 우회)
+    background_tasks.add_task(process_vector_store_background, temp_file_path)
+
+    return {
+        "status": "accepted",
+        "message": "PDF 파일이 접수되었습니다. 백그라운드에서 벡터 DB를 생성하고 있습니다."
+    }
+
+
+# ---------------------------------------------------------
+# 4. 백그라운드 작업 상태 확인 엔드포인트
+# ---------------------------------------------------------
+@app.get("/api/vectorstore/status")
+async def get_vector_store_status():
+    """클라이언트가 벡터 DB 생성 진행 상황을 확인할 수 있는 상태 조회 API"""
+    return db_status
+
+
+# ---------------------------------------------------------
+# 5. 질의응답 및 스트리밍 답변 생성 엔드포인트
 # ---------------------------------------------------------
 @app.post("/api/chat/stream")
 async def chat_stream(request: QueryRequest):
     """사용자의 질의를 받아 MultiQueryRetriever로 문서를 검색하고, 현진건 작가 페르소나로 답변을 스트리밍합니다."""
     global retriever
     if not retriever:
-        raise HTTPException(status_code=400, detail="Vector DB가 생성되지 않았습니다. 먼저 PDF를 업로드하여 DB를 생성하세요.")
+        raise HTTPException(status_code=400, detail="Vector DB가 아직 생성되지 않았거나 준비 중입니다. 잠시 후 다시 시도해 주세요.")
 
-    # 랭체인 프롬프트 허브 컨셉: 현진건 작가 페르소나 적용 프롬프트 템플릿
+    # 현진건 작가 페르소나 적용 프롬프트 템플릿
     template = """당신은 소설 '운수 좋은 날'을 집필한 현진건 작가님입니다. 
 근대 한국 문학의 현실주의적 시각과 그 시대의 비극적 어조를 살려 사용자의 질문에 답변하세요.
 제공된 참고 문서의 내용을 바탕으로 깊이 있는 문학적 답변을 구성해야 합니다.
@@ -148,11 +173,11 @@ async def chat_stream(request: QueryRequest):
         streaming=True
     )
 
-    # 텍스트 포맷팅 헬퍼 함수 (출처 정보 함께 구성)
+    # 텍스트 포맷팅 헬퍼 함수
     def format_docs(docs):
         return "\n\n".join([doc.page_content for doc in docs])
 
-    # 검색된 문서 출처를 함께 반환하기 위한 체인 구성 (RunnablePassthrough 활용)
+    # 검색된 문서 출처를 함께 반환하기 위한 체인 구성
     rag_chain_from_docs = (
         RunnablePassthrough.assign(context=(lambda x: format_docs(x["context"])))
         | prompt
@@ -177,11 +202,9 @@ async def chat_stream(request: QueryRequest):
 
     # 클라이언트로 결과 및 출처를 스트리밍 형식으로 전송하기 위한 제너레이터
     async def generate():
-        # 먼저 검색된 출처 정보를 JSON 형태로 전송하거나 마크다운으로 구성
         import json
         yield f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
         
-        # LLM 답변 본문 스트리밍 전송뮬
         chunk_size = 20
         for i in range(0, len(response_text), chunk_size):
             chunk = response_text[i:i+chunk_size]
