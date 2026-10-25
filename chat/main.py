@@ -14,6 +14,12 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from supabase import create_client, Client
 
+# 프록시 환경 변수 자동 주입으로 인한 openai/httpx 충돌 방지
+os.environ.pop("http_proxy", None)
+os.environ.pop("https_proxy", None)
+os.environ.pop("HTTP_PROXY", None)
+os.environ.pop("HTTPS_PROXY", None)
+
 app = Flask(__name__)
 
 # -------------------------------------------------------------
