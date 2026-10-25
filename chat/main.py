@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import httpx
 from flask import Flask, request, Response, jsonify
 from werkzeug.utils import secure_filename
 
@@ -14,18 +15,13 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from supabase import create_client, Client
 
-# 프록시 환경 변수 자동 주입으로 인한 openai/httpx 충돌 방지
+app = Flask(__name__)
+
+# 프록시 환경 변수 충돌 방지
 os.environ.pop("http_proxy", None)
 os.environ.pop("https_proxy", None)
 os.environ.pop("HTTP_PROXY", None)
 os.environ.pop("HTTPS_PROXY", None)
-
-app = Flask(__name__)
-
-# -------------------------------------------------------------
-# 안전한 지연 초기화(Lazy Loading) 함수들
-# (서버가 켜질 때가 아니라, 실제 기능이 실행될 때 객체를 생성하여 크래시 방지)
-# -------------------------------------------------------------
 
 def get_supabase_client():
     url = os.environ.get("SUPABASE_URL")
@@ -38,7 +34,14 @@ def get_embeddings():
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
-    return OpenAIEmbeddings(openai_api_key=api_key, model="text-embedding-3-small")
+    
+    # [핵심 해결] proxies 충돌을 막기 위해 커스텀 http_client 주입
+    custom_http_client = httpx.Client(params=None)
+    return OpenAIEmbeddings(
+        openai_api_key=api_key, 
+        model="text-embedding-3-small",
+        http_client=custom_http_client
+    )
 
 def get_vector_store():
     return SupabaseVectorStore(
@@ -59,14 +62,16 @@ def get_llm():
         streaming=True
     )
 
+@app.route("/", methods=["GET"])
+def index():
+    return "🏙️ 도시 정책 RAG AI 백엔드 서버가 정상적으로 실행 중입니다!", 200
+
 @app.route("/health", methods=["GET"])
 def health_check():
-    """서버 상태 확인용 헬스체크 엔드포인트"""
     return jsonify({"status": "healthy", "message": "Cloud Run 서버가 정상 작동 중입니다."}), 200
 
 @app.route("/upload-pdf", methods=["POST"])
 def upload_pdf():
-    """PDF 파일을 업로드받아 텍스트 추출 후 Supabase Vector DB에 저장"""
     try:
         if 'file' not in request.files:
             return jsonify({"error": "업로드된 PDF 파일이 없습니다."}), 400
@@ -78,7 +83,6 @@ def upload_pdf():
         filename = secure_filename(file.filename)
         file_bytes = file.read()
         
-        # 1. PDF 텍스트 변환
         pdf_reader = PdfReader(io.BytesIO(file_bytes))
         raw_text = ""
         for page in pdf_reader.pages:
@@ -89,7 +93,6 @@ def upload_pdf():
         if not raw_text.strip():
             return jsonify({"error": "PDF 파일에서 텍스트를 추출할 수 없습니다."}), 400
 
-        # 2. 청크 단위 쪼개기
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
@@ -100,7 +103,6 @@ def upload_pdf():
             metadatas=[{"source": filename}]
         )
 
-        # 3. Vector DB 저장
         v_store = get_vector_store()
         v_store.add_documents(chunks)
 
@@ -117,7 +119,6 @@ def upload_pdf():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    """대화 기록 기반 질의 확장 및 RAG 스트리밍 답변 생성"""
     try:
         data = request.get_json()
         if not data or "query" not in data:
@@ -135,7 +136,6 @@ def chat():
 
         current_llm = get_llm()
 
-        # 1. Query Augmentation Chain 구성
         augmentation_prompt = ChatPromptTemplate.from_messages([
             ("system", "기존의 대화 내용을 활용하여 사용자가 질문한 의도를 파악해서 한문장의 명료한 질문으로 변환하라. 대명사나 이, 저, 그와 같은 표현을 명확한 명사로 표현하라."),
             MessagesPlaceholder(variable_name="chat_history"),
@@ -149,7 +149,6 @@ def chat():
             "question": user_query
         })
 
-        # 2. 벡터 DB 검색
         v_store = get_vector_store()
         retriever = v_store.as_retriever(search_kwargs={"k": 3})
         retrieved_docs = retriever.invoke(augmented_query)
@@ -157,7 +156,6 @@ def chat():
         context_text = "\n\n".join([doc.page_content for doc in retrieved_docs])
         sources = list(set([doc.metadata.get("source", "알 수 없는 출처") for doc in retrieved_docs]))
 
-        # 3. RAG 답변 생성
         rag_prompt = ChatPromptTemplate.from_messages([
             ("system", "너는 문서에 기반해 답변하는 도시 정책 전문가야. 아래 제공된 참고 문서를 바탕으로 사용자의 질문에 정확하고 상세히 답변해줘. 만약 문서에 없는 내용이라면 모른다고 솔직하게 답변해."),
             ("human", "참고 문서:\n{context}\n\n사용자 질의: {augmented_query}")
