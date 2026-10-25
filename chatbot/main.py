@@ -1,4 +1,6 @@
 import os
+# Chroma DB의 익명 텔레메트리(통계 수집) 기능을 꺼서 관련 오류 및 지연 방지
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 import shutil
 from typing import AsyncGenerator
 from fastapi import FastAPI, File, HTTPException, UploadFile, BackgroundTasks
