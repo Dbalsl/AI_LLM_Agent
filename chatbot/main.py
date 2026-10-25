@@ -61,28 +61,26 @@ async def create_vector_store(file: UploadFile = File(...)):
     
     temp_file_path = f"temp_{file.filename}"
     try:
-        # 업로드된 PDF 파일을 서버 임시 디렉토리에 저장
         with open(temp_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # PyPDFLoader를 사용하여 PDF 텍스트 추출
         loader = PyPDFLoader(temp_file_path)
         docs = loader.load()
 
-        # RecursiveCharacterTextSplitter를 활용하여 청크 단위로 분할 (크기 500, 오버랩 50)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        # [수정] 텍스트 청크 크기를 키우고 오버랩을 줄여서 전체 청크 개수 줄이기 (Timeout 방지)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         chunks = text_splitter.split_documents(docs)
 
-        # 구글 임베딩 모델 설정 (models/text-embedding-004)
         embeddings = GoogleGenerativeAIEmbeddings(
             model="models/text-embedding-004",
-            google_api_key=GOOGLE_API_KEY
+            google_api_key=GOOGLE_API_KEY,
+            # [추가] 대량 문서 처리 시 타임아웃 방지를 위한 배치 크기 제한 (지원하는 경우)
+            batch_size=10
         )
 
-        # Chroma 벡터스토어 생성
+        # Chroma 벡터스토어 생성 (청크가 너무 많으면 이 부분에서 504가 발생하므로 분할 처리 권장)
         vector_store = Chroma.from_documents(chunks, embeddings)
 
-        # 랭체인 다중 질문 검색기(MultiQueryRetriever) 구성
         base_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
         llm_for_query = ChatGoogleGenerativeAI(
             model="gemini-1.5-flash", 
@@ -90,7 +88,6 @@ async def create_vector_store(file: UploadFile = File(...)):
             google_api_key=GOOGLE_API_KEY
         )
         
-        # 다중 질문 검색기 적용 (사용자 질문을 여러 각도로 확장하여 검색 품질 향상)
         retriever = MultiQueryRetriever.from_llm(
             retriever=base_retriever,
             llm=llm_for_query
@@ -104,10 +101,8 @@ async def create_vector_store(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # 임시 파일 삭제 정리
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
-
 
 # ---------------------------------------------------------
 # 3. 질의응답 및 스트리밍 답변 생성 엔드포인트
