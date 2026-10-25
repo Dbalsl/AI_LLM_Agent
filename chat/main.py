@@ -14,6 +14,11 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from supabase import create_client, Client
 
+print("--- 환경 변수 디버깅 ---")
+print(f"OPENAI_API_KEY 존재 여부: {bool(os.environ.get('OPENAI_API_KEY'))}")
+print(f"OPENAI_API_KEY 길이: {len(os.environ.get('OPENAI_API_KEY', ''))}")
+print(f"SUPABASE_URL 존재 여부: {bool(os.environ.get('SUPABASE_URL'))}")
+
 app = Flask(__name__)
 
 # 환경 변수 설정
