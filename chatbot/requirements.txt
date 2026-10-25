@@ -5,3 +5,4 @@ langchain-google-genai
 chromadb==0.4.24
 pypdf==4.1.0
 pydantic==2.6.4
+python-multipart==0.0.9
