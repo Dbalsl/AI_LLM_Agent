@@ -29,9 +29,9 @@ def get_supabase_client():
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 def get_embeddings():
-    # 구글 공식 Gemini 임베딩 모델명 적용
+    # 반드시 앞에 'models/'를 붙여야 합니다.
     return GoogleGenerativeAIEmbeddings(
-        model="gemini-embedding-001",
+        model="models/embedding-001",
         google_api_key=GOOGLE_API_KEY
     )
 
