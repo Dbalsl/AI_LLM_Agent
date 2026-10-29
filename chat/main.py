@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import httpx
 from flask import Flask, request, Response, jsonify
 from werkzeug.utils import secure_filename
 
@@ -28,11 +29,12 @@ def get_supabase_client():
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 def get_embeddings():
-    # 모델명을 안정적인 embedding-001로 설정
+    # 구글 공식 Gemini 임베딩 모델명 적용
     return GoogleGenerativeAIEmbeddings(
-        model="embedding-001",
+        model="gemini-embedding-001",
         google_api_key=GOOGLE_API_KEY
     )
+
 def get_vector_store():
     return SupabaseVectorStore(
         client=get_supabase_client(),
