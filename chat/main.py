@@ -28,9 +28,9 @@ def get_supabase_client():
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 def get_embeddings():
-    # 모델명을 최신 표준인 text-embedding-004로 변경
+    # 모델명을 안정적인 embedding-001로 설정
     return GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
+        model="embedding-001",
         google_api_key=GOOGLE_API_KEY
     )
 def get_vector_store():
