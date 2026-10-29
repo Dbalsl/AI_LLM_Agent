@@ -1,15 +1,13 @@
 import os
 import io
 import json
-import httpx
 from flask import Flask, request, Response, jsonify
 from werkzeug.utils import secure_filename
 
 from pypdf import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import SupabaseVectorStore
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
@@ -17,30 +15,23 @@ from supabase import create_client, Client
 
 app = Flask(__name__)
 
-# 프록시 환경 변수 충돌 방지
-os.environ.pop("http_proxy", None)
-os.environ.pop("https_proxy", None)
-os.environ.pop("HTTP_PROXY", None)
-os.environ.pop("HTTPS_PROXY", None)
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
+if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+    raise ValueError("Supabase 관련 환경 변수가 설정되지 않았습니다.")
 
 def get_supabase_client():
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_KEY")
-    if not url or not key:
-        raise ValueError("SUPABASE_URL 또는 SUPABASE_SERVICE_KEY가 설정되지 않았습니다.")
-    return create_client(url, key)
+    return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 def get_embeddings():
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
-    
-    # [핵심 해결] proxies 충돌을 막기 위해 커스텀 http_client 주입
-    custom_http_client = httpx.Client(params=None)
-    return OpenAIEmbeddings(
-        openai_api_key=api_key, 
-        model="text-embedding-3-small",
-        http_client=custom_http_client
+    # OpenAI 대신 구글 Gemini 임베딩 모델 사용 (무료/API 키 공유)
+    return GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001",
+        google_api_key=GOOGLE_API_KEY
     )
 
 def get_vector_store():
@@ -52,12 +43,9 @@ def get_vector_store():
     )
 
 def get_llm():
-    google_key = os.environ.get("GOOGLE_API_KEY")
-    if not google_key:
-        raise ValueError("GOOGLE_API_KEY가 설정되지 않았습니다.")
     return ChatGoogleGenerativeAI(
         model="gemini-3.5-flash-lite",
-        google_api_key=google_key,
+        google_api_key=GOOGLE_API_KEY,
         temperature=0.3,
         streaming=True
     )
