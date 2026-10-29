@@ -93,7 +93,15 @@ def upload_pdf():
         )
 
         v_store = get_vector_store()
-        v_store.add_documents(chunks)
+        
+        # [핵심 해결] 무료 등급 분당 토큰 제한(Rate Limit)을 피하기 위해 10개씩 나누어 안전하게 업로드
+        import time
+        batch_size = 10
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            v_store.add_documents(batch)
+            if i + batch_size < len(chunks):
+                time.sleep(1) # API 부하 방지용 1초 대기
 
         return jsonify({
             "success": True, 
@@ -104,7 +112,7 @@ def upload_pdf():
     except Exception as e:
         import traceback
         print(traceback.format_exc())
-        return jsonify({"error": f"PDF 처리 중 서버 에러 발생: {str(e)}"}), 500
+        return jsonify({"error": f"PDF 처리 중 서버 에러 발생: {str(e)} "}), 500
 
 @app.route("/chat", methods=["POST"])
 def chat():
