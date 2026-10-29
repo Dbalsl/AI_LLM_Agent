@@ -28,12 +28,11 @@ def get_supabase_client():
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 def get_embeddings():
-    # OpenAI 대신 구글 Gemini 임베딩 모델 사용 (무료/API 키 공유)
+    # 모델명을 최신 표준인 text-embedding-004로 변경
     return GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001",
+        model="models/text-embedding-004",
         google_api_key=GOOGLE_API_KEY
     )
-
 def get_vector_store():
     return SupabaseVectorStore(
         client=get_supabase_client(),
