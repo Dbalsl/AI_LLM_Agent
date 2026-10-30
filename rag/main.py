@@ -34,15 +34,21 @@ embeddings = GoogleGenerativeAIEmbeddings(
     model="models/text-embedding-004",
     google_api_key=api_key
 )
+# 1. 모델 변경: 경량/고속 모델인 gemini-2.0-flash-lite 적용
+# max_tokens를 지정하여 응답 길이를 적정 수준으로 제한
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash", 
+    model="gemini-2.0-flash-lite", 
     temperature=0.2,
+    max_tokens=600,  # 원하는 최대 길이(글자/토큰)로 조절 가능
     google_api_key=api_key
 )
 
+# 2. 시스템 프롬프트: 핵심 위주로 간결하게 답변하도록 지침 추가
 SYSTEM_PROMPT = """당신은 도시 계획 설계자입니다. 특히 서울시에 특화된 설계자로 사용자의 질문에 답변하세요.
 
-다음 컨텍스트를 참고하여 서울시 도시 계획 전문가로서 전문적이고 명확하게 답변해 주세요:
+[답변 작성 규칙]
+- 다음 컨텍스트를 참고하여 질문에 대해 장황한 서술을 피하고 핵심 내용 위주로 명확하고 간결하게 3~5줄 내외로 요약하여 답변하세요.
+
 {context}"""
 
 prompt = ChatPromptTemplate.from_messages([
