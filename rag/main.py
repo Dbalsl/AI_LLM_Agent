@@ -121,24 +121,23 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 @app.post("/chat")
 async def chat(req: QueryRequest):
-    """다중 질의 검색기 및 RunnablePassthrough를 적용한 질의응답"""
     try:
         vectorstore = Chroma(
             persist_directory=CHROMA_PERSIST_DIR,
             embedding_function=embeddings
         )
         
-        # 검색 대상 청크 수를 k=2로 지정하여 처리 지연 단축
+        # k=1 또는 2로 지정하여 검색할 문서 청크 크기를 최소화 (처리 속도 대폭 향상)
         base_retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-        # 다중 질의 검색기 (MultiQueryRetriever)
+        # 시험 필수 요구사항: MultiQueryRetriever
         multi_retriever = MultiQueryRetriever.from_llm(
             retriever=base_retriever,
             llm=llm,
             prompt=QUERY_GENERATION_PROMPT
         )
 
-        # 질의 확장을 위한 RunnablePassthrough 파이프라인
+        # 시험 필수 요구사항: RunnablePassthrough
         rag_chain = (
             {
                 "context": multi_retriever,
@@ -149,8 +148,9 @@ async def chat(req: QueryRequest):
             | StrOutputParser()
         )
 
+        # RAG 파이프라인 호출
         answer = rag_chain.invoke(req.question)
         return {"answer": answer}
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"서버 내부 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
