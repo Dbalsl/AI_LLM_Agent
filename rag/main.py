@@ -100,20 +100,20 @@ async def upload_pdf(file: UploadFile = File(...)):
 @app.post("/chat")
 async def chat(req: QueryRequest):
     try:
-        # Chroma 인스턴스 로드
         vectorstore = Chroma(
             persist_directory=CHROMA_PERSIST_DIR,
             embedding_function=embeddings
         )
-        base_retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+        
+        # k를 2로 줄여 검색 지연 및 LLM 토큰 처리 시간을 대폭 단축
+        base_retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-        # 다중 질의 검색기 설정
+        # 다중 질의 검색기
         multi_retriever = MultiQueryRetriever.from_llm(
             retriever=base_retriever,
             llm=llm
         )
 
-        # RAG 체인 파이프라인
         rag_chain = (
             {
                 "context": multi_retriever,
@@ -126,6 +126,9 @@ async def chat(req: QueryRequest):
 
         answer = rag_chain.invoke(req.question)
         return {"answer": answer}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         # 오류 내용을 명확하게 클라이언트로 전달
