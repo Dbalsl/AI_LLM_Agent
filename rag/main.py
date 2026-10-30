@@ -129,7 +129,4 @@ async def chat(req: QueryRequest):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        traceback.print_exc()
-        # 오류 내용을 명확하게 클라이언트로 전달
-        raise HTTPException(status_code=500, detail=f"서버 내부 오류: {str(e)}")
+
