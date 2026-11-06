@@ -1,0 +1,23 @@
+# ==============================================================================
+# FastAPI + FAISS + Hybrid Search (BM25) + Multi-Query + RAG Fusion 패키지 목록
+# ==============================================================================
+
+# 1. 웹 프레임워크 및 ASGI 서버
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+
+# 2. 벡터 검색 (FAISS) 및 수치 연산
+faiss-cpu==1.9.0.post1
+numpy==1.26.4
+
+# 3. 키워드 검색 (Sparse / BM25)
+rank-bm25==0.2.2
+
+# 4. PDF 문서 파싱 및 텍스트 추출
+pypdf==5.1.0
+
+# 5. LLM 및 임베딩 연동 (Google Gemini API)
+google-genai==1.2.0
+
